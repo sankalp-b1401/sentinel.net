@@ -1,10 +1,10 @@
 from scapy.all import rdpcap, Ether, IP, TCP, UDP
-from capture import capture_packets
 import json
+import os
 
-capture_packets()
-
-packets = rdpcap("../capture_logs/capture_pkt.pcap")
+os.listdir("capture_logs")
+pkt_choice = int(input("Enter the packet number to analyze (1-5): "))
+packets = rdpcap("capture_logs/capture_pkt.pcap")
 
 packets_json = []
 for seq, pkt in enumerate(packets, start=1):
