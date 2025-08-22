@@ -58,7 +58,7 @@ def select_interface():
         try:
             user_choice = int(input(f"\nSelect an interface to sniff packets (1-{len(usable_ifaces)}): "))
             if 1 <= user_choice <= len(usable_ifaces):
-                return usable_ifaces[user_choice - 1]['name']
+                return usable_ifaces[user_choice - 1]
             else:
                 print("Invalid selection. Try again.")
         except ValueError:
