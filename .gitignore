@@ -2,3 +2,5 @@ venv/
 tests/
 sniffer/capture_logs/
 sniffer/parsed_logs/
+flow_records/
+.vscode/
