@@ -18,11 +18,11 @@ def generate_filename(prefix="capture", output_dir="capture_logs"):
     timestamp = time.strftime('%Y%m%d_%H%M%S')
     return os.path.join(output_dir, f"{prefix}_{timestamp}.pcap")
 
-def capture_packets_on_interface(interface_name, packet_count=5000, bpf_filter='tcp or udp'):
+def capture_packets_on_interface(interface_name, count=10000, bpf_filter='tcp or udp'):
     """Capture packets on the given interface."""
     try:
         print(f"Starting packet capture on interface: {interface_name}")
-        packets = sniff(iface=interface_name, filter=bpf_filter, count=packet_count)
+        packets = sniff(iface=interface_name, filter=bpf_filter, count=count)
         print(f"Captured {len(packets)} packets.")
         return packets
     except Exception as e:

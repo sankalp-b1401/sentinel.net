@@ -197,7 +197,7 @@ if __name__ == "__main__":
         selected_file = select_packet_file(files)
         packets = rdpcap(selected_file.path)
 
-        # Modular parse to JSON
+        # Will be used for real-time monitoring
         # parse_to_json(packets, filename_prefix=os.path.splitext(selected_file.name)[0])
 
         # Generate flow records with expiration
