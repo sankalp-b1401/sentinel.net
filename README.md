@@ -35,36 +35,31 @@ Sentinel.net is a multi-agentic Python-based network security system for Windows
 ```
 sentinel.net/
 │
-├── sniffer/
-│   ├── capture.py
-│   ├── if_manager.py
-│   ├── parser.py
-│   ├── capture_logs/
-│   ├── parsed_logs/
+├── config.py                 # Global constants and paths
 │
-├── detector/
-│   ├── __init__.py
-│   ├── detector.py
-│   ├── feature_builder.py
-│   ├── metrics.py
-│   ├── real_time.py
-│   ├── alerts/
-│   ├── features/
-│   └── models/
+├── sniffer/                  # Packet capture & flow building
+│ ├── capture.py
+│ ├── if_manager.py
+│ ├── parser.py
+│ ├── capture_logs/           # PCAPs stored here
+│ └── parsed_logs/
 │
-├── utils/
-│   ├── __init__.py
-│   ├── chooser.py
-│   ├── progress.py
+├── detector/                 # Feature extraction & anomaly detection
+│ ├── metrics.py
+│ ├── feature_builder.py
+│ ├── detector.py
+│ ├── realtime.py
+│ ├── features/               # Feature files
+│ ├── models/                 # Trained Isolation Forest models
+│ └── alerts/                 # Detection alerts
 │
-├── responder/          # (Planned)
+├── utils/ # Helpers
+│ ├── chooser.py              # Interactive file selector
+│ ├── progress.py             # CLI progress bars
 │
-├── flow_records/
-│
-├── tests/
-│
-├── requirements.txt
-└── README.md
+├── flow_records/             # JSON/JSONL flow records
+├── responder/                # Planned responder agent
+└── tests/                    # Unit tests
 ```
 
 ## Installation
@@ -76,10 +71,17 @@ sentinel.net/
    cd sentinel.net
    ```
 
-2. **Install dependencies:**
+2. **Create a virtual environment (Recommended):**
+   ```sh
+   python -m venv venv
+   venv\Scripts\activate      # Windows
+   ```
+3. **Install dependencies:**
    ```sh
    pip install -r requirements.txt
    ```
+4. **Platform Setup:**
+   Install [NPcap](https://npcap.com/)
 
 ## Usage
 
@@ -88,7 +90,7 @@ sentinel.net/
 1. **Run the sniffer:**
 
    ```sh
-   python sniffer/capture.py
+   python -m sniffer.capture
    ```
 
    - Select a network interface when prompted.
@@ -96,18 +98,38 @@ sentinel.net/
 
 2. **Parse packets and generate flow records:**
    ```sh
-   python sniffer/parser.py
+   python -m sniffer.parser
    ```
    - Select a PCAP file to analyze.
    - Flow records are saved in `flow_records/`.
 
 ### Detector
 
-1. **Run the detector:**
+1. **Build Features:**
+
    ```sh
-   python detector/detector.py
+   python -m detector.feature_builder
    ```
-   - Uses flow features and trained models to detect anomalies.
+
+   - Uses flow records to build features.
+   - Features are saved in `detector/features/`.
+
+2. **Train the detector:**
+
+   ```sh
+   python -m detector.detector train
+   ```
+
+   - Uses flow features to train the model.
+   - Alerts are saved in `detector/models/`.
+
+3. **Run the detector:**
+
+   ```sh
+   python -m detector.detector score
+   ```
+
+   - Uses flow features and trained model to detect anomalies.
    - Alerts are saved in `detector/alerts/`.
 
 ### Responder
@@ -121,13 +143,22 @@ sentinel.net/
 - [psutil](https://github.com/giampaolo/psutil)
 - [tabulate](https://pypi.org/project/tabulate/)
 - [pytest](https://pytest.org/)
-- Windows OS with NPCAP installed
+- [Numpy] (https://numpy.org/)
+- [Scikit-learn] (https://scikit-learn.org/stable/)
+- [Joblib] (https://joblib.readthedocs.io/)
+- [Humanize] (https://pypi.org/project/humanize/)
+
+## Future Prospects
+
+- Responder Agent: automatic blocking/quarantine actions.
+- GUI/Dashboard: visualize flows, features, and alerts in real time.
+- Improved Models: protocol-specific Isolation Forests, or deep learning models.
+- Threshold Calibration: save percentile thresholds alongside models.
+- Integration: export alerts into ELK/Grafana/Prometheus pipelines.
+- Optimization: multiprocessing parsers, GPU-accelerated training, sampling strategies.
+- Cross-Platform Support: any operating system can use.
 
 ## Notes
 
 - Output and test directories are git-ignored.
 - Future releases will integrate Descope for agent scope management.
-
-## License
-
-MIT License (add your
