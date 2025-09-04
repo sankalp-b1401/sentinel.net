@@ -1,6 +1,6 @@
 # Sentinel.net
 
-Sentinel.net is a modular Python-based network security toolkit for Windows, designed to capture, analyze, detect, and respond to network incidents. It combines packet sniffing, AI-based detection, and automated incident response, with future plans for granular agent scope control using Descope.
+Sentinel.net is a multi-agentic Python-based network security system for Windows, designed to capture, analyze, detect, and respond to network incidents. It combines packet sniffing, AI-based detection, and automated incident response, with future plans for granular agent scope control using Descope.
 
 ## Features
 
@@ -48,19 +48,14 @@ sentinel.net/
 │   ├── feature_builder.py
 │   ├── metrics.py
 │   ├── real_time.py
-│   ├── __pycache__/
 │   ├── alerts/
-│   │   ├── alerts.json
-│   │   └── realtime_alerts.jsonl
 │   ├── features/
-|   |
 │   └── models/
 │
 ├── utils/
 │   ├── __init__.py
 │   ├── chooser.py
 │   ├── progress.py
-│   └── __pycache__/
 │
 ├── responder/          # (Planned)
 │
