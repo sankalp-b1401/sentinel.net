@@ -29,23 +29,26 @@ Sentinel.net is a modular Python-based network security toolkit for Windows, des
 ```
 sentinel.net/
 │
+├── config.py               # central paths & constants
+│
 ├── sniffer/
-│   ├── capture.py         # Packet capture logic
-│   ├── if_manager.py      # Interface selection
-│   ├── parser.py          # Packet parsing and flow record generation
-│   ├── capture_logs/      # Saved PCAP files
-│   ├── parsed_logs/       # Per-packet JSON (optional)
+│   ├── if_manager.py       # class InterfaceManager (Windows NPCAP)
+│   ├── capture.py          # class PacketCapture (save pcap OR stream)
+│   ├── parser.py           # class FlowBuilder (incremental + expiry)
+│   ├── capture_logs/
+│   └── parsed_logs/
 │
-├── detector/              # (Planned) AI-based detection logic
+├── detector/
+│   ├── metrics.py          # (kept functional; added FEATURE_ORDER)
+│   ├── detector.py         # class IsolationForestDetector + CLI
+│   ├── feature_builder.py  # batch: flow JSON -> features JSON
+│   ├── realtime.py         # real-time orchestrator (threads, queues)
+│   ├── alerts/
+│   ├── features/
+│   └── models/
 │
-├── responder/             # (Planned) Incident response agents
-│
-├── flow_records/          # Output flow record JSON files
-│
-├── tests/                 # Unit tests
-│
-├── requirements.txt
-└── README.md
+├── flow_records/
+└── tests/
 ```
 
 ## Installation

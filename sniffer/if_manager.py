@@ -1,84 +1,85 @@
-from scapy.arch.windows import get_windows_if_list
+# sniffer/if_manager.py
+from __future__ import annotations
+import sys
 from tabulate import tabulate
-from psutil import net_if_stats
+from psutil import net_if_stats, net_if_addrs
 
-# ----------------------------
-# Helper Functions
-# ----------------------------
+try:
+    # Windows
+    from scapy.arch.windows import get_windows_if_list
+    def _list_ifaces():
+        return get_windows_if_list()
+except Exception:
+    # Linux/macOS fallback using psutil
+    def _list_ifaces():
+        out = []
+        for name, addrs in net_if_addrs().items():
+            ips = [a.address for a in addrs if getattr(a, "family", None) in (2, 23)]  # AF_INET/AF_INET6-ish
+            macs = [a.address for a in addrs if str(getattr(a, "family", "")) == "AF_LINK"]
+            out.append({
+                "name": name,
+                "description": name,
+                "index": None,
+                "ips": ips,
+                "mac": macs[0] if macs else None,
+            })
+        return out
 
-def get_all_interfaces():
-    """Retrieve all interfaces from Windows NPCAP and their stats."""
-    try:
-        if_list = get_windows_if_list()
-        if_stats = net_if_stats()
-    except Exception as e:
-        raise RuntimeError(f"Error retrieving interfaces: {e}")
-    return if_list, if_stats
+class InterfaceManager:
+    def __init__(self) -> None:
+        self._if_list = []
+        self._if_stats = {}
 
-def filter_usable_interfaces(if_list, if_stats):
-    """Filter out loopback interfaces and interfaces that are down."""
-    usable_ifaces = []
-    for iface in if_list:
-        name = iface['name']
-        if "Loopback" in iface['description']:
-            continue
-        stats = if_stats.get(name)
-        if not stats or not stats.isup:
-            continue
-        usable_ifaces.append(iface)
-    return usable_ifaces
-
-def display_interfaces(interfaces, if_stats):
-    """Display available interfaces in a table using tabulate."""
-    table_data = []
-    for idx, iface in enumerate(interfaces, start=1):
-        ips = ", ".join(iface['ips']) if iface['ips'] else "NA"
-        mac = iface['mac'] if iface['mac'] else "NA"
-        status = "Up" if if_stats[iface['name']].isup else "Down"
-        table_data.append([idx, iface['name'], iface['description'], iface['index'], status, ips, mac])
-    
-    headers = ["Idx", "Name", "Description", "SystemIdx", "Status", "IP(s)", "MAC"]
-    print(tabulate(table_data, headers=headers, tablefmt="fancy_grid"))
-
-def user_select_interface(usable_ifaces):
-    """Prompt the user to select an interface."""
-    while True:
+    def refresh(self) -> None:
         try:
-            choice = int(input(f"\nSelect an interface to sniff packets (1-{len(usable_ifaces)}): "))
-            if 1 <= choice <= len(usable_ifaces):
-                return usable_ifaces[choice - 1]
-            else:
-                print("Invalid selection. Try again.")
-        except ValueError:
-            print("Please enter a valid number.")
+            self._if_list = _list_ifaces()
+            self._if_stats = net_if_stats()
+        except Exception as e:
+            raise RuntimeError(f"Error retrieving interfaces: {e}")
 
-# ----------------------------
-# Main Interface Manager Functions
-# ----------------------------
+    def usable(self) -> list[dict]:
+        self.refresh()
+        usable = []
+        for iface in self._if_list:
+            name = iface.get("name", "")
+            if "Loopback" in (iface.get("description") or "") or name.lower().startswith("lo"):
+                continue
+            stats = self._if_stats.get(name)
+            if not stats or not stats.isup:
+                continue
+            usable.append(iface)
+        if not usable:
+            raise RuntimeError("No usable network interfaces found.")
+        return usable
 
-def get_usable_interfaces():
-    """Return a list of usable interfaces along with their stats."""
-    if_list, if_stats = get_all_interfaces()
-    usable_ifaces = filter_usable_interfaces(if_list, if_stats)
-    if not usable_ifaces:
-        raise RuntimeError("No usable network interfaces found.")
-    return usable_ifaces, if_stats
+    def display(self, interfaces: list[dict]) -> None:
+        rows = []
+        for idx, iface in enumerate(interfaces, start=1):
+            name = iface.get("name", "NA")
+            desc = iface.get("description", "NA")
+            idx_sys = iface.get("index", "NA")
+            ips = ", ".join(iface.get("ips") or []) or "NA"
+            mac = iface.get("mac", "NA")
+            status = "Up" if self._if_stats.get(name, None) and self._if_stats[name].isup else "Down"
+            rows.append([idx, name, desc, idx_sys, status, ips, mac])
+        print(tabulate(rows, headers=["Idx","Name","Description","SystemIdx","Status","IP(s)","MAC"], tablefmt="fancy_grid"))
 
-def select_interface():
-    """
-    Main function to list usable interfaces and prompt user selection.
-    Returns the selected interface dictionary.
-    """
-    usable_ifaces, if_stats = get_usable_interfaces()
-    display_interfaces(usable_ifaces, if_stats)
-    return user_select_interface(usable_ifaces)
+    def select(self) -> dict:
+        interfaces = self.usable()
+        self.display(interfaces)
+        while True:
+            try:
+                choice = int(input(f"\nSelect interface (1-{len(interfaces)}): "))
+                if 1 <= choice <= len(interfaces):
+                    return interfaces[choice - 1]
+            except ValueError:
+                pass
+            print("Invalid selection. Try again.")
 
-# ----------------------------
-# Example Usage
-# ----------------------------
-# if __name__ == "__main__":
-#     try:
-#         iface = select_interface()
-#         print(f"\nSelected Interface: {iface['name']} - {iface['description']}")
-#     except Exception as e:
-#         print(f"Error: {e}")
+if __name__ == "__main__":
+    try:
+        iface = InterfaceManager().select()
+        print("\n[ok] Selected:", iface.get("name"))
+    except Exception as e:
+        print(f"[err] {e}")
+        sys.exit(1)
