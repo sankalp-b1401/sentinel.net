@@ -4,22 +4,28 @@ Sentinel.net is a modular Python-based network security toolkit for Windows, des
 
 ## Features
 
-- **Sniffer Agent:**
+- **Sniffer:**
 
   - Interactive network interface selection
   - TCP/UDP packet capture using Scapy
   - Timestamped PCAP file storage
   - Packet parsing and flow record generation
 
-- **Automated Detector Agent:** _(Coming soon)_
+- **AI-Based Detector:**
 
-  - Integrates machine learning models to identify suspicious or malicious network activity
-  - Real-time and batch analysis of captured packets
+  - Extracts flow features from captured packets
+  - Integrates machine learning models (e.g., Isolation Forest) to identify suspicious or malicious network activity
+  - Real-time and batch analysis
+  - Alert generation and metrics tracking
 
-- **Incident Responder Agent:** _(Coming soon)_
+- **Incident Responder Agents:** _(Planned)_
 
   - Automated response to detected incidents
   - Modular agent architecture for custom response strategies
+
+- **Utils:**
+
+  - Utility functions for progress bars, interface selection, and more
 
 - **Scope Limitation:** _(Planned)_
   - Integration with [Descope](https://www.descope.com/) to restrict agent scopes and permissions for enhanced security
@@ -29,26 +35,41 @@ Sentinel.net is a modular Python-based network security toolkit for Windows, des
 ```
 sentinel.net/
 │
-├── config.py               # central paths & constants
-│
 ├── sniffer/
-│   ├── if_manager.py       # class InterfaceManager (Windows NPCAP)
-│   ├── capture.py          # class PacketCapture (save pcap OR stream)
-│   ├── parser.py           # class FlowBuilder (incremental + expiry)
+│   ├── capture.py
+│   ├── if_manager.py
+│   ├── parser.py
 │   ├── capture_logs/
-│   └── parsed_logs/
+│   ├── parsed_logs/
 │
 ├── detector/
-│   ├── metrics.py          # (kept functional; added FEATURE_ORDER)
-│   ├── detector.py         # class IsolationForestDetector + CLI
-│   ├── feature_builder.py  # batch: flow JSON -> features JSON
-│   ├── realtime.py         # real-time orchestrator (threads, queues)
+│   ├── __init__.py
+│   ├── detector.py
+│   ├── feature_builder.py
+│   ├── metrics.py
+│   ├── real_time.py
+│   ├── __pycache__/
 │   ├── alerts/
+│   │   ├── alerts.json
+│   │   └── realtime_alerts.jsonl
 │   ├── features/
+|   |
 │   └── models/
 │
+├── utils/
+│   ├── __init__.py
+│   ├── chooser.py
+│   ├── progress.py
+│   └── __pycache__/
+│
+├── responder/          # (Planned)
+│
 ├── flow_records/
-└── tests/
+│
+├── tests/
+│
+├── requirements.txt
+└── README.md
 ```
 
 ## Installation
@@ -85,9 +106,18 @@ sentinel.net/
    - Select a PCAP file to analyze.
    - Flow records are saved in `flow_records/`.
 
-### Detector & Responder
+### Detector
 
-- **Detector and responder modules** will be available in future releases.
+1. **Run the detector:**
+   ```sh
+   python detector/detector.py
+   ```
+   - Uses flow features and trained models to detect anomalies.
+   - Alerts are saved in `detector/alerts/`.
+
+### Responder
+
+- **Responder modules** will be available in future releases.
 
 ## Requirements
 
@@ -102,3 +132,7 @@ sentinel.net/
 
 - Output and test directories are git-ignored.
 - Future releases will integrate Descope for agent scope management.
+
+## License
+
+MIT License (add your

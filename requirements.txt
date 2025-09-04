@@ -2,3 +2,7 @@ scapy
 psutil
 tabulate
 pytest
+joblib
+numpy
+scikit-learn
+humanize
