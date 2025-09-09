@@ -17,7 +17,7 @@ A multi-agent AI system for **network monitoring and anomaly detection**, built 
 Descope provides OAuth-based scoped access tokens, ensuring:
 
 - **Agent identity validation** (`sub`, `azp`, `iss` claims)
-- **Fine-grained scopes** (e.g., `sniffer:push`, `detector:adm`)
+- **Fine-grained scopes** (e.g., `sniffer:push`)
 - **Secure API-to-API communication** between the Sniffer and Detector agents
 
 ---
