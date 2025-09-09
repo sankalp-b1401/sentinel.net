@@ -1,164 +1,170 @@
 # Sentinel.net
 
-Sentinel.net is a multi-agentic Python-based network security system for Windows, designed to capture, analyze, detect, and respond to network incidents. It combines packet sniffing, AI-based detection, and automated incident response, with future plans for granular agent scope control using Descope.
+A multi-agent AI system for **network monitoring and anomaly detection**, built with a sniffer (Agent A) and a detector (Agent B), securely integrated via **Descope authentication**. The project enables capturing, parsing, and analyzing real-time and offline network traffic, generating alerts for anomalous activities while enforcing **scoped, authenticated agent-to-agent communication**.
 
-## Features
+---
 
-- **Sniffer:**
+## Team Details
 
-  - Interactive network interface selection
-  - TCP/UDP packet capture using Scapy
-  - Timestamped PCAP file storage
-  - Packet parsing and flow record generation
+**Team Name:** Skibidi  
+**Member:** Sankalp Bansal
 
-- **AI-Based Detector:**
+---
 
-  - Extracts flow features from captured packets
-  - Integrates machine learning models (e.g., Isolation Forest) to identify suspicious or malicious network activity
-  - Real-time and batch analysis
-  - Alert generation and metrics tracking
+## Hackathon Theme
 
-- **Incident Responder Agents:** _(Planned)_
+**Theme 3:** Secure agent-to-agent communication and trust.  
+Descope provides OAuth-based scoped access tokens, ensuring:
 
-  - Automated response to detected incidents
-  - Modular agent architecture for custom response strategies
+- **Agent identity validation** (`sub`, `azp`, `iss` claims)
+- **Fine-grained scopes** (e.g., `sniffer:push`, `detector:adm`)
+- **Secure API-to-API communication** between the Sniffer and Detector agents
 
-- **Utils:**
+---
 
-  - Utility functions for progress bars, interface selection, and more
+## Key Components
 
-- **Scope Limitation:** _(Planned)_
-  - Integration with [Descope](https://www.descope.com/) to restrict agent scopes and permissions for enhanced security
+- **Sniffer Agent (Agent A):** Captures network packets, converts to flows, and either stores locally or securely streams batches to Detector.
+- **Detector Agent (Agent B):** Scores flows using anomaly detection models (Isolation Forest, etc.), generates alerts, and stores results in structured JSON files.
+- **Auth Layer (Descope):** Ensures only authenticated, scoped requests pass between Sniffer and Detector.
+- **Main Orchestrator:** CLI-based unified entrypoint (`main.py`) that guides the user through capture, parse, batch-send, and scoring.
 
-## Directory Structure
+---
 
-```
+## Tech Stack
+
+- **Python 3.11**
+- **Scapy** (packet capture)
+- **psutil** (network interface stats)
+- **Flask** (detector API server)
+- **scikit-learn** (Isolation Forest anomaly detection)
+- **Descope** (OAuth provider for agent authentication and scopes)
+- **joblib** (model persistence)
+- **Nmap** (packet capture driver)
+
+Dependencies are listed in `requirements.txt`.
+
+---
+
+## Project Tree
+
+```plaintext
 sentinel.net/
 │
-├── config.py                 # Global constants and paths
+├── auth/                     # Authentication (Descope & JWKS verification)
+│   ├── descope_client.py
+│   ├── jwk_verify.py
 │
-├── sniffer/                  # Packet capture & flow building
-│ ├── capture.py
-│ ├── if_manager.py
-│ ├── parser.py
-│ ├── capture_logs/           # PCAPs stored here
-│ └── parsed_logs/
+├── detector/                 # Detector Agent
+│   ├── alerts/
+│   ├── features/
+│   ├── inbox/
+│   ├── models/
+│   ├── status/
+│   ├── detector.py
+│   ├── feature_builder.py
+│   ├── metrics.py
+│   ├── queue_worker.py
+│   ├── real_time.py
+│   ├── server_http.py
 │
-├── detector/                 # Feature extraction & anomaly detection
-│ ├── metrics.py
-│ ├── feature_builder.py
-│ ├── detector.py
-│ ├── realtime.py
-│ ├── features/               # Feature files
-│ ├── models/                 # Trained Isolation Forest models
-│ └── alerts/                 # Detection alerts
+├── sniffer/                  # Sniffer Agent
+│   ├── capture_logs/
+│   ├── batch_sender.py
+│   ├── capture.py
+│   ├── if_manager.py
+│   ├── parser.py
+│   ├── sender_worker.py
+│   ├── transport_http.py
 │
-├── utils/ # Helpers
-│ ├── chooser.py              # Interactive file selector
-│ ├── progress.py             # CLI progress bars
+├── utils/                    # Utility functions
+│   ├── alert_accuracy_check.py
+│   ├── chooser.py
+│   ├── progress.py
 │
-├── flow_records/             # JSON/JSONL flow records
-├── responder/                # Planned responder agent
-└── tests/                    # Unit tests
+├── flow_records/             # Stored parsed flow files
+├── main.py                   # CLI Orchestrator
+├── config.py                 # Config loader for .env variables
+├── requirements.txt
+└── README.md
+
 ```
 
-## Installation
+---
 
-1. **Clone the repository:**
+## sentinel.net 101
 
-   ```sh
-   git clone https://github.com/yourusername/sentinel.net.git
-   cd sentinel.net
-   ```
+### 1. Clone & Install
 
-2. **Create a virtual environment (Recommended):**
-   ```sh
-   python -m venv venv
-   venv\Scripts\activate      # Windows
-   ```
-3. **Install dependencies:**
-   ```sh
-   pip install -r requirements.txt
-   ```
-4. **Platform Setup:**
-   Install [NPcap](https://npcap.com/)
+```bash
+git clone https://github.com/<your-repo>/sentinel.net.git
+cd sentinel.net
+python -m venv venv
+source venv/bin/activate   # or venv\Scripts\activate on Windows
+pip install -r requirements.txt
+```
 
-## Usage
+### 2. Configure Descope
 
-### Sniffer
+- Create a **Sniffer-Agent Inbound App** and **Detector-Agent Inbound App** in Descope Console.
+- Add required scopes (e.g., `sniffer:push`, `detector:adm`).
+- Copy **Client ID, Secret, Issuer, JWKS URL, Token URL** into `.env` file in the project root.
 
-1. **Run the sniffer:**
+Example `.env`:
 
-   ```sh
-   python -m sniffer.capture
-   ```
+```env
+DESCOPE_CLIENT_ID=xxxxx
+DESCOPE_CLIENT_SECRET=xxxxx
+DESCOPE_ISSUER=https://api.descope.com/v1/apps/xxxx
+DESCOPE_JWKS_URL=https://api.descope.com/v1/apps/xxxx/.well-known/jwks.json
+DESCOPE_TOKEN_ENDPOINT=https://api.descope.com/oauth2/v1/apps/token
+SERVICE_AUDIENCE=detector-api
+```
 
-   - Select a network interface when prompted.
-   - Captured packets are saved in `sniffer/capture_logs/`.
+### 3. Run Detector (Agent B)
 
-2. **Parse packets and generate flow records:**
-   ```sh
-   python -m sniffer.parser
-   ```
-   - Select a PCAP file to analyze.
-   - Flow records are saved in `flow_records/`.
+```bash
+python -m detector.server_http
+```
 
-### Detector
+- Interactive model selection will prompt you to choose a trained model.
+- Starts API on `127.0.0.1:8443`.
 
-1. **Build Features:**
+### 4. Run Sniffer (Agent A)
 
-   ```sh
-   python -m detector.feature_builder
-   ```
+```bash
+python main.py
+```
 
-   - Uses flow records to build features.
-   - Features are saved in `detector/features/`.
+- Offers options to **capture packets**, **parse PCAP**, **save flows locally**, or **send flows directly to Detector**.
+- Interactive CLI ensures authentication session is established before streaming.
 
-2. **Train the detector:**
+---
 
-   ```sh
-   python -m detector.detector train
-   ```
+## Example Workflow
 
-   - Uses flow features to train the model.
-   - Alerts are saved in `detector/models/`.
+1. Capture packets:  
+   `main.py` → Capture infinite or finite packets.
+2. Choose processing:
+   - Save flows locally → stored in `flow_records/`.
+   - Send flows to detector → securely authenticated batch transfer.
+3. Detector scoring:
+   - Alerts saved in `detector/alerts/` as JSON.
+   - Each batch/session creates a **new alert file**.
 
-3. **Run the detector:**
+---
 
-   ```sh
-   python -m detector.detector score
-   ```
+## Video Link
 
-   - Uses flow features and trained model to detect anomalies.
-   - Alerts are saved in `detector/alerts/`.
+[Link to demo video will be added here]
 
-### Responder
+---
 
-- **Responder modules** will be available in future releases.
+## What I would do with more time
 
-## Requirements
+- Improve AI model performance (better training datasets, ensemble methods).
+- Build **GUI dashboards** for visualization.
+- Implement an **automated incident responder agent**.
+- Optimize token handling for long-lived real-time capture sessions.
 
-- Python 3.11+
-- [Scapy](https://scapy.net/)
-- [psutil](https://github.com/giampaolo/psutil)
-- [tabulate](https://pypi.org/project/tabulate/)
-- [pytest](https://pytest.org/)
-- [Numpy] (https://numpy.org/)
-- [Scikit-learn] (https://scikit-learn.org/stable/)
-- [Joblib] (https://joblib.readthedocs.io/)
-- [Humanize] (https://pypi.org/project/humanize/)
-
-## Future Prospects
-
-- Responder Agent: automatic blocking/quarantine actions.
-- GUI/Dashboard: visualize flows, features, and alerts in real time.
-- Improved Models: protocol-specific Isolation Forests, or deep learning models.
-- Threshold Calibration: save percentile thresholds alongside models.
-- Integration: export alerts into ELK/Grafana/Prometheus pipelines.
-- Optimization: multiprocessing parsers, GPU-accelerated training, sampling strategies.
-- Cross-Platform Support: any operating system can use.
-
-## Notes
-
-- Output and test directories are git-ignored.
-- Future releases will integrate Descope for agent scope management.
+---

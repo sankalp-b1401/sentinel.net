@@ -1,3 +1,4 @@
+# detector/metrics.py
 """
 Pure feature/metric helpers for network flow records.
 
@@ -8,14 +9,18 @@ All functions are side-effect free and safe against zeros (use epsilons).
 """
 
 from __future__ import annotations
-# from typing import Mapping, Optional
 import math
 import ipaddress
 
 # ----------- constants -----------
 
-EPS = 1e-9  # to avoid division by zero
-
+EPS = 1e-9  # to avoid division by zero in logs
+# Small floor for duration-based rates to avoid astronomical pps/bps when duration ~ 0
+MIN_DURATION = 0.01  # seconds (10 ms) — used only for rate calcs
+# Caps to protect from numeric explosion (tweak as needed)
+MAX_PPS = 1e6         # packets per second
+MAX_BPS = 1e9         # bytes per second
+MAX_BYTES_PER_PKT = 1e7
 
 # ----------- safe math helpers -----------
 
@@ -27,12 +32,22 @@ def log1p_safe(x: float) -> float:
 # ----------- basic time/size metrics -----------
 
 def duration_sec(start_time: float, end_time: float) -> float:
-    """Flow duration in seconds (non-negative, min EPS)."""
-    return max(EPS, end_time - start_time)
+    """
+    Flow duration in seconds (non-negative).
+    NOTE: we return the true duration (possibly very small) — callers that compute
+    rates should use rate_duration() to apply the MIN_DURATION floor.
+    """
+    return max(0.0, end_time - start_time)
+
+
+def rate_duration(start_time: float, end_time: float) -> float:
+    """Duration used for rate calculations — apply MIN_DURATION floor."""
+    d = duration_sec(start_time, end_time)
+    return max(MIN_DURATION, d)
 
 
 def log_duration(start_time: float, end_time: float) -> float:
-    """Safe log of duration seconds."""
+    """Safe log of duration seconds (uses true duration)."""
     return log1p_safe(duration_sec(start_time, end_time))
 
 
@@ -47,20 +62,24 @@ def log_pkts(packet_count: int) -> float:
 
 
 def bytes_per_pkt(byte_count: int, packet_count: int) -> float:
-    """Average bytes per packet."""
-    return float(byte_count) / max(1.0, float(packet_count))
+    """Average bytes per packet, capped to avoid extreme values."""
+    pcount = max(1.0, float(packet_count))
+    val = float(byte_count) / pcount
+    return min(val, MAX_BYTES_PER_PKT)
 
 
 def pps(packet_count: int, start_time: float, end_time: float) -> float:
-    """Packets per second."""
-    d = duration_sec(start_time, end_time)
-    return float(packet_count) / d
+    """Packets per second with duration floor and cap."""
+    d = rate_duration(start_time, end_time)
+    val = float(packet_count) / d
+    return min(val, MAX_PPS)
 
 
 def bps(byte_count: int, start_time: float, end_time: float) -> float:
-    """Bytes per second."""
-    d = duration_sec(start_time, end_time)
-    return float(byte_count) / d
+    """Bytes per second with duration floor and cap."""
+    d = rate_duration(start_time, end_time)
+    val = float(byte_count) / d
+    return min(val, MAX_BPS)
 
 
 # ----------- directionality (A->B vs B->A) -----------
@@ -107,9 +126,9 @@ def proto_is_tcp(protocol: str) -> int:
 def dst_port_bin(endpointB_port: int) -> int:
     """
     Coarse bucket of destination port:
-      0 = well-known (0–1023) -> Used by standard services (HTTP, HTTPS, DNS, SSH, SMTP, RDP, etc.).
-      1 = registered (1024–49151) -> Used by many legitimate but less universal services (databases, app servers, ephemeral registered services).
-      2 = dynamic/private (49152–65535) -> when your laptop makes an outbound web request, the source port is usually from this range
+      0 = well-known (0–1023)
+      1 = registered (1024–49151)
+      2 = dynamic/private (49152–65535)
     """
     if endpointB_port <= 1023:
         return 0
@@ -170,48 +189,6 @@ def is_priv_to_public(src_ip: str, dst_ip: str) -> int:
         return 0
 
 
-# # ----------- rarity helpers (optional; supply your own counts) -----------
-
-# def rarity_from_count(count: int, total: int, smoothing: float = 1000.0) -> float:
-#     """
-#     Generic rarity: -log((count+1) / (total + smoothing))
-#     Larger = rarer. Supply counts from your rolling baseline.
-#     """
-#     num = float(count) + 1.0
-#     den = float(total) + float(smoothing)
-#     return -math.log(max(num / max(den, EPS), EPS))
-
-
-# def r_dst_port(freq_dst_port: Mapping[int, int], dst_port: int,
-#                total_flows: int, smoothing: float = 1000.0) -> float:
-#     """Rarity of destination port based on counts in freq_dst_port map."""
-#     c = int(freq_dst_port.get(dst_port, 0))
-#     return rarity_from_count(c, total_flows, smoothing)
-
-
-# def r_dst_subnet(freq_dst_subnet: Mapping[str, int], dst_ip: str, prefix: int,
-#                  total_subnets: int, smoothing: float = 1000.0) -> float:
-#     """
-#     Rarity of destination subnet (e.g., /24).
-#     freq_dst_subnet keys should be subnet strings like '74.125.130.0/24'.
-#     """
-#     try:
-#         net = ipaddress.ip_network(f"{dst_ip}/{prefix}", strict=False)
-#         key = f"{net.network_address}/{prefix}"
-#     except Exception:
-#         key = f"0.0.0.0/{prefix}"
-#     c = int(freq_dst_subnet.get(key, 0))
-#     return rarity_from_count(c, total_subnets, smoothing)
-
-
-# def r_src_to_dst_port(freq_src_to_port: Mapping[tuple[str, int], int],
-#                       src_ip: str, dst_port: int,
-#                       total_for_src: int, smoothing: float = 1000.0) -> float:
-#     """Rarity of (src_ip -> dst_port) pair."""
-#     c = int(freq_src_to_port.get((src_ip, dst_port), 0))
-#     return rarity_from_count(c, total_for_src, smoothing)
-
-
 # ----------- composite helper -----------
 
 def compute_core_features(
@@ -260,7 +237,7 @@ def compute_core_features(
         "same_subnet_v4":    float(same_subnet_v4(endpointA_ip, endpointB_ip, 24)),
         "is_priv_to_public": float(is_priv_to_public(endpointA_ip, endpointB_ip)),
     }
-    
+
     return d
 
 
@@ -272,6 +249,7 @@ FEATURE_ORDER = [
     "proto_is_tcp", "dst_port_bin", "flow_size_class",
     "same_subnet_v4", "is_priv_to_public",
 ]
+
 
 def features_from_record(flow: dict) -> dict[str, float]:
     """Accept one flow-record dict (from your parser) and return feature dict (no rarity)."""
@@ -295,11 +273,12 @@ def features_from_record(flow: dict) -> dict[str, float]:
         rst_count      = flow.get("rst_count", 0),
     )
 
+
 __all__ = [
     # math
     "log1p_safe",
     # time/size
-    "duration_sec", "log_duration", "log_bytes", "log_pkts",
+    "duration_sec", "rate_duration", "log_duration", "log_bytes", "log_pkts",
     "bytes_per_pkt", "pps", "bps",
     # directionality
     "out_in_ratio", "dir_pkt_ratio",

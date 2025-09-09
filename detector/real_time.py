@@ -49,7 +49,7 @@ def run_realtime(model_path: Path | None = None, iface_name: str | None = None) 
                 pkt = packet_q.get(timeout=0.5)
                 # update flows; possibly yields expired flows immediately (gap-based)
                 for rec in flow_builder.update(pkt) or []:
-                    _score_and_emit(rec, det, alerts_path)
+                    _score_and_emit(rec, det, alerts_path, debug=args.debug)
             except Empty:
                 pass
 
@@ -57,7 +57,7 @@ def run_realtime(model_path: Path | None = None, iface_name: str | None = None) 
             now = time()
             if now - last_flush >= 1.0:
                 for rec in flow_builder.flush_expired(now):
-                    _score_and_emit(rec, det, alerts_path)
+                    _score_and_emit(rec, det, alerts_path, debug=args.debug)
                 last_flush = now
 
     except KeyboardInterrupt:
@@ -68,10 +68,10 @@ def run_realtime(model_path: Path | None = None, iface_name: str | None = None) 
         t_cap.join(timeout=2.0)
         # flush remaining flows
         for rec in flow_builder.flush_all():
-            _score_and_emit(rec, det, alerts_path)
+            _score_and_emit(rec, det, alerts_path, debug=args.debug)
         print("[rt] shutdown complete.")
 
-def _score_and_emit(flow_record: dict, det: IsolationForestDetector, out_path: Path) -> None:
+def _score_and_emit(flow_record: dict, det: IsolationForestDetector, out_path: Path, debug: bool = False) -> None:
     # compute features
     feat = features_from_record(flow_record)
     # to ndarray in FEATURE_ORDER
@@ -80,6 +80,11 @@ def _score_and_emit(flow_record: dict, det: IsolationForestDetector, out_path: P
     X = np.asarray([vec], dtype=float)
     anom, pred = det.score(X)
     is_anom = int(pred[0]) == -1
+
+    if debug:
+        print(f"[flow] src={flow_record['endpointA_ip']}:{flow_record['endpointA_port']} "
+              f"dst={flow_record['endpointB_ip']}:{flow_record['endpointB_port']} "
+              f"pkts={flow_record['packet_count']} bytes={flow_record['byte_count']} score={anom[0]:.6f} pred={int(pred[0])}")
 
     alert = {
         "time_scored": time(),
@@ -92,6 +97,7 @@ def _score_and_emit(flow_record: dict, det: IsolationForestDetector, out_path: P
         _save_jsonl(alert, out_path)
         print(f"[ALERT] score={anom[0]:.4f} pred=-1 src={flow_record['endpointA_ip']} dst={flow_record['endpointB_ip']}:{flow_record['endpointB_port']}")
 
+# main guard
 if __name__ == "__main__":
     import argparse
     from config import MODEL_FILENAME
@@ -99,7 +105,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="Real-time capture + flow + features + IF detection")
     ap.add_argument("--iface", help="Interface name (prompts if omitted)")
     ap.add_argument("--model", default=str((MODELS_DIR / MODEL_FILENAME)), help="Path to .joblib model")
+    ap.add_argument("--debug", action="store_true", help="Print every scored flow (for testing)")
     args = ap.parse_args()
 
     mp = Path(args.model) if args.model else select_file(MODELS_DIR, ["*.joblib"], title="Select model (.joblib)")
+    # pass debug flag through
     run_realtime(model_path=mp, iface_name=args.iface)

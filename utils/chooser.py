@@ -8,6 +8,8 @@ def _files_in(dir_path: Path, patterns: list[str]) -> list[Path]:
     files: list[Path] = []
     for pat in patterns:
         files.extend(sorted(Path(dir_path).glob(pat)))
+    # Exclude model scaler sidecars created by your training (e.g. name.joblib.scaler.joblib)
+    files = [f for f in files if not f.name.endswith(".scaler.joblib")]
     return [f for f in files if f.is_file()]
 
 def select_file(dir_path: Path, patterns: list[str], title: str) -> Path:

@@ -4,8 +4,13 @@ import sys
 from tabulate import tabulate
 from psutil import net_if_stats, net_if_addrs
 
+#cross-platform support for listing interfaces
+"""
+NPcap is a windows uitility, therefore if we try to run this code on any other operating system, it will fail.
+To avoid this, we will try to import the windows specific library first, and if it fails, we will fallback to a more generic method using psutil.
+"""
 try:
-    # Windows
+    # if ran on Windows interface
     from scapy.arch.windows import get_windows_if_list
     def _list_ifaces():
         return get_windows_if_list()
@@ -14,7 +19,13 @@ except Exception:
     def _list_ifaces():
         out = []
         for name, addrs in net_if_addrs().items():
-            ips = [a.address for a in addrs if getattr(a, "family", None) in (2, 23)]  # AF_INET/AF_INET6-ish
+            # AF_INET and AF_INET6 are socket constants with fixed integer values
+            # 2 -> AF_INET (IPv4 addresses)
+            # 23 -> AF_INET6 (IPv6 addresses)
+            # We use these values to filter all addresses except IPv4 and IPv6
+            ips = [a.address for a in addrs if getattr(a, "family", None) in (2, 23)]
+
+            # AF_LINK is the constant for MAC addresses on macOS and BSD
             macs = [a.address for a in addrs if str(getattr(a, "family", "")) == "AF_LINK"]
             out.append({
                 "name": name,
@@ -32,7 +43,10 @@ class InterfaceManager:
 
     def refresh(self) -> None:
         try:
+             # list of dictionaries where key is the interface name and value is a dictionary of interface details
             self._if_list = _list_ifaces()
+
+            # dictionary where key is the interface name and value is a list of named tuples storing interface network stats
             self._if_stats = net_if_stats()
         except Exception as e:
             raise RuntimeError(f"Error retrieving interfaces: {e}")

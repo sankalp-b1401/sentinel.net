@@ -5,4 +5,7 @@ pytest
 joblib
 numpy
 scikit-learn
+pandas
 humanize
+requests
+python-dotenv

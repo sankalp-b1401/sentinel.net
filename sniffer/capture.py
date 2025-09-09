@@ -1,20 +1,21 @@
 # sniffer/capture.py
 from __future__ import annotations
-from scapy.all import sniff, wrpcap, Packet
-from queue import Queue
-from threading import Thread, Event
+from scapy.all import sniff, Packet
+from scapy.utils import PcapWriter
 from time import strftime
 from pathlib import Path
-from typing import Optional, Callable
+from threading import Event, Thread
+from queue import Queue
+from typing import Optional
 from config import CAPTURE_DIR, BPF_FILTER
 
 class PacketCapture:
-
+    @staticmethod
     def _render_progress(current: int, total: int, width: int = 40) -> None:
-        """
-        Draw a simple in-terminal progress bar like: [██████------] 60% (600/1000)
-        """
+        """Draw a simple in-terminal progress bar."""
         if total <= 0:
+            # for unbounded capture we show just a counter
+            print(f"\rCaptured: {current} packets", end="", flush=True)
             return
         ratio = min(max(current / float(total), 0.0), 1.0)
         filled = int(width * ratio)
@@ -27,62 +28,81 @@ class PacketCapture:
 
     def capture_to_file(self, count: int = 100000, prefix: str = "capture") -> Path:
         """
-        Capture up to `count` packets to a PCAP while showing a CLI progress bar.
+        Capture up to `count` packets to a PCAP while showing a CLI progress status.
+        If count == 0 then capture until Ctrl+C.
         """
         CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         fname = CAPTURE_DIR / f"{prefix}_{strftime('%Y%m%d_%H%M%S')}.pcap"
 
-        packets = []  # we'll store manually so we can show live progress
+        writer = PcapWriter(str(fname), append=False, sync=True)
+        captured = 0
+        stop_event = Event()
 
-        def _on_pkt(pkt):
-            # append & update progress
-            packets.append(pkt)
-            if count and len(packets) <= count:
-                PacketCapture._render_progress(len(packets), count)
+        def _on_pkt(pkt: Packet):
+            nonlocal captured
+            try:
+                writer.write(pkt)
+                captured += 1
+                # render differently for unbounded vs bounded captures
+                PacketCapture._render_progress(captured, count)
+            except Exception:
+                # don't stop capture on individual packet write errors
+                pass
 
         try:
-            # sniff until we reach 'count' (or Ctrl+C)
+            # For unbounded (count == 0) show simple counter, else show progress bar
+            print(f"[info] starting capture on '{self.iface}' (filter='{self.bpf}') - press Ctrl+C to stop" if count == 0 else f"[info] capturing up to {count} packets on '{self.iface}'")
             sniff(
                 iface=self.iface,
                 filter=self.bpf,
-                store=False,           # we store ourselves in 'packets'
+                store=False,
                 prn=_on_pkt,
-                stop_filter=lambda p: (count > 0 and len(packets) >= count)
+                stop_filter=lambda p: (count > 0 and captured >= count) or stop_event.is_set()
             )
         except KeyboardInterrupt:
-            # user stopped early
-            pass
+            # user pressed Ctrl+C — make shutdown explicit
+            print("\n[info] stopping capture now and closing file. Please wait...")
+            stop_event.set()
         except Exception as e:
             print(f"\n[err] capture error on {self.iface}: {e}")
-
-        # finalize bar line
-        if count:
-            PacketCapture._render_progress(len(packets), count)
-        print()  # newline after the bar
-
-        # write the PCAP (only if we actually have packets)
-        if packets:
+        finally:
             try:
-                wrpcap(str(fname), packets)
-                print(f"[ok] saved {len(packets)} packets -> {fname}")
-            except Exception as e:
-                print(f"[err] failed to write pcap: {e}")
+                writer.close()
+            except Exception:
+                pass
+
+        # final render and summary
+        if count:
+            PacketCapture._render_progress(captured, count)
         else:
-            print("[warn] no packets captured; nothing written")
+            # print newline for the counter line
+            print()
+
+        if captured:
+            print(f"\n[ok] saved {captured} packets -> {fname}")
+        else:
+            # if user aborted very quickly we may have an empty file; delete it
+            try:
+                if fname.exists() and fname.stat().st_size == 24:  # minimal pcap header size sometimes small
+                    fname.unlink(missing_ok=True)
+                    print("[warn] no packets captured; removed empty file")
+                else:
+                    print("[warn] no packets captured; nothing written")
+            except Exception:
+                print("[warn] no packets captured; unable to clean up file")
 
         return fname
 
-
     def start_stream(self, packet_queue: Queue, stop_event: Event, store: bool = False) -> Thread:
         """
-        Start a background thread that streams packets into packet_queue.
-        Use stop_event.set() to stop. Returns the Thread object.
+        Background thread capture that pushes packets into packet_queue.
+        Use stop_event.set() to request stop.
         """
         def _prn(pkt: Packet) -> None:
             try:
                 packet_queue.put(pkt, block=False)
             except Exception:
-                # queue full; drop packet to avoid backpressure lockup
+                # queue full -> drop to avoid blocking sniff thread
                 pass
 
         def _worker():
@@ -90,7 +110,7 @@ class PacketCapture:
                 sniff(
                     iface=self.iface,
                     filter=self.bpf,
-                    store=0 if not store else 1,  # default: don't store in memory
+                    store=0 if not store else 1,
                     prn=_prn,
                     stop_filter=lambda p: stop_event.is_set()
                 )
@@ -101,29 +121,28 @@ class PacketCapture:
         t.start()
         return t
 
+
 if __name__ == "__main__":
     import argparse
-    from .if_manager import InterfaceManager  # package-relative
+    from .if_manager import InterfaceManager
     from config import BPF_FILTER
 
     parser = argparse.ArgumentParser(description="Packet capture helper")
     parser.add_argument("--iface", help="Interface name to capture on (prompts if omitted)")
-    parser.add_argument("--count", type=int, default=2000, help="Number of packets to capture")
+    parser.add_argument("--count", type=int, default=2000, help="Number of packets to capture (0 = until Ctrl+C)")
     parser.add_argument("--prefix", default="capture", help="Output pcap filename prefix")
     parser.add_argument("--filter", default=BPF_FILTER, help="BPF filter")
     args = parser.parse_args()
 
-    # choose interface if not provided
     iface_name = args.iface
     if not iface_name:
         iface = InterfaceManager().select()
         iface_name = iface["name"]
 
-    print(f"[info] capturing on '{iface_name}' with filter '{args.filter}'")
     try:
         cap = PacketCapture(iface_name, bpf=args.filter)
         cap.capture_to_file(count=args.count, prefix=args.prefix)
     except KeyboardInterrupt:
-        print("\n[info] capture interrupted.")
+        print("\n[info] capture interrupted by user.")
     except Exception as e:
         print(f"[err] capture failed: {e}")

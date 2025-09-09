@@ -4,6 +4,8 @@ from scapy.all import IP, TCP, UDP, Packet
 from time import time
 from typing import Iterator, Tuple, Dict, Any
 from config import FLOW_EXPIRATION_SECONDS
+from scapy.utils import PcapReader
+from pathlib import Path
 
 PROTO_NAME = {6: "TCP", 17: "UDP", 1: "ICMP"}
 
@@ -158,20 +160,49 @@ class FlowBuilder:
             yield self._make_record(key, inst)
             self.flow_table.pop(key, None)
 
+def parse_pcap_to_flow_generator(pcap_path: Path | str, expiration_window: int | None = None) -> Iterator[dict]:
+    """
+    Generator over flow dicts produced from a pcap file.
+    Does not perform any I/O other than reading the pcap.
+    Usage:
+       for flow in parse_pcap_to_flow_generator("capture_20250904_....pcap"):
+           process(flow)
+    """
+    p = Path(pcap_path)
+    if expiration_window is None:
+        expiration_window = FLOW_EXPIRATION_SECONDS
+    fb = FlowBuilder(expiration_window)
+    with PcapReader(str(p)) as pr:
+        for pkt in pr:
+            outs = fb.update(pkt)
+            if outs:
+                # fb.update returns None or an iterator of records; handle both
+                # (older implementations returned None when nothing; newer returned generator)
+                try:
+                    # If outs is an iterator/list
+                    for rec in outs:
+                        yield rec
+                except TypeError:
+                    # outs might be a single dict or None
+                    if isinstance(outs, dict):
+                        yield outs
+        # finally flush all remaining instances
+        for rec in fb.flush_all():
+            yield rec
+
+# bottom of sniffer/parser.py (replace existing __main__ block)
 if __name__ == "__main__":
     import argparse, json
     from pathlib import Path
-    from scapy.utils import PcapReader
-    from config import FLOW_RECORD_DIR, CAPTURE_DIR
+    from config import FLOW_RECORD_DIR, CAPTURE_DIR, AUTH_TRANSPORT
     from utils.chooser import select_file
-    from utils.progress import render_counter, end_line
-    from sniffer.parser import FlowBuilder  # ensure correct import
 
     parser = argparse.ArgumentParser(description="Parse PCAP into flow records (streaming, 30s expiry).")
     parser.add_argument("pcap", nargs="?", help="Path to .pcap/.pcapng (menu if omitted)")
     parser.add_argument("--out", help="Output file; default: flow_records/<pcap>_flow.jsonl (streaming JSONL)")
-    parser.add_argument("--jsonl", action="store_true", help="Force JSONL; otherwise JSONL is default for streaming")
     parser.add_argument("--expire", type=int, default=30, help="Flow idle expiry seconds (default 30)")
+    parser.add_argument("--send", action="store_true", help="Send flows to detector immediately (requires configured HTTP transport)")
+    parser.add_argument("--batch-size", type=int, default=64, help="Batch size to send (when --send).")
     args = parser.parse_args()
 
     try:
@@ -180,30 +211,71 @@ if __name__ == "__main__":
         )
         FLOW_RECORD_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Stream packets
         fb = FlowBuilder(expiration_window=args.expire)
         out_path = Path(args.out) if args.out else FLOW_RECORD_DIR / f"{pcap_path.stem}_flow.jsonl"
+
+        send_mode = bool(args.send)
+        batch_size = max(1, int(args.batch_size))
+
+        if send_mode and AUTH_TRANSPORT != "http":
+            print("[warn] HTTP transport not enabled in config; falling back to saving locally.")
+            send_mode = False
+
+        sender = None
+        if send_mode:
+            from sniffer.batch_sender import BatchSender
+            sender = BatchSender()
+            print("[info] SEND mode: flows will be posted to detector in batches.")
+            print("[info] If a send fails, the affected flows will be written to disk (no data lost).")
+        else:
+            print(f"[info] SAVE mode: flow records will be written to {out_path}")
+
+        # iterate packets and produce flows
         count_pkts = 0
         count_flows = 0
+        batch = []
 
-        with PcapReader(str(pcap_path)) as pr, out_path.open("w", encoding="utf-8") as fh:
+        with PcapReader(str(pcap_path)) as pr, out_path.open("a", encoding="utf-8") as fh:
             for pkt in pr:
                 count_pkts += 1
                 outs = fb.update(pkt)
                 if outs:
                     for rec in outs:
-                        fh.write(json.dumps(rec) + "\n")
                         count_flows += 1
-                if (count_pkts % 1000) == 0:
-                    render_counter(count_pkts, prefix=f"flows={count_flows}")
-            # periodic flush of any remaining expired flows
-            remaining = list(fb.flush_all())
-            for rec in remaining:
-                fh.write(json.dumps(rec) + "\n")
-                count_flows += 1
-            end_line()
+                        if send_mode and sender:
+                            batch.append(rec)
+                            if len(batch) >= batch_size:
+                                ok, resp, failed = sender.send_batch(batch)
+                                if not ok:
+                                    for br in failed:
+                                        fh.write(json.dumps(br) + "\n")
+                                    fh.flush()
+                                batch = []
+                        else:
+                            fh.write(json.dumps(rec) + "\n")
 
-        print(f"[ok] parsed packets={count_pkts}, flows={count_flows} -> {out_path}")
-        print("[hint] feature_builder can read JSONL directly.")
+            # flush remaining flows from builder
+            for rec in fb.flush_all():
+                count_flows += 1
+                if send_mode and sender:
+                    batch.append(rec)
+                else:
+                    fh.write(json.dumps(rec) + "\n")
+
+            # final flush of any leftover batch
+            if send_mode and sender and batch:
+                ok, resp, failed = sender.send_batch(batch)
+                if not ok and failed:
+                    for br in failed:
+                        fh.write(json.dumps(br) + "\n")
+                batch = []
+
+        if sender:
+            try:
+                sender.close()
+            except Exception:
+                pass
+
+        print(f"[ok] parsed packets={count_pkts}, flows={count_flows} -> output={out_path if not send_mode else 'sent to detector (verify server logs)'}")
     except Exception as e:
         print(f"[err] {e}")
