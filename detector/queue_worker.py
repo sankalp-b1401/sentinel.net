@@ -11,6 +11,7 @@ from detector.metrics import features_from_record, FEATURE_ORDER
 from detector.detector import IsolationForestDetector
 from config import MODELS_DIR, ALERTS_DIR, INBOX_DIR, STATUS_DIR
 
+
 log = logging.getLogger("detector.queue_worker")
 log.setLevel(logging.INFO)
 
@@ -18,7 +19,6 @@ log.setLevel(logging.INFO)
 ALERTS_DIR.mkdir(parents=True, exist_ok=True)
 INBOX_DIR.mkdir(parents=True, exist_ok=True)
 STATUS_DIR.mkdir(parents=True, exist_ok=True)
-
 
 def _score_batch(det, rows):
     import numpy as np
@@ -168,8 +168,150 @@ def _worker_loop(q: Queue, model_path: str):
         except Exception as e:
             log.exception("unexpected worker error: %s", e)
 
-
 def start_worker(q: Queue, model_path: str):
     t = Thread(target=_worker_loop, args=(q, model_path), daemon=True)
+    t.start()
+    # start session worker in addition
+    start_session_worker(model_path)
+    return t
+
+# ---------------- session processing ----------------
+from time import sleep
+import shutil
+JOBS_DIR = Path("detector") / "jobs"
+ARCHIVE_DIR = Path("detector") / "archive"
+JOBS_DIR.mkdir(parents=True, exist_ok=True)
+ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+
+def _process_session(session_id: str, model_path: str):
+    """
+    Aggregate and score all batch files under INBOX_DIR/<session_id>/.
+    Produce ALERTS_DIR/session_<session_id>_alerts.jsonl and STATUS_DIR/session_<session_id>.json
+    """
+
+    det = IsolationForestDetector()
+    try:
+        det.load(model_path)
+    except Exception as e:
+        log.exception("session worker failed to load model: %s", e)
+        STATUS_DIR.mkdir(parents=True, exist_ok=True)
+        status_file = STATUS_DIR / f"session_{session_id}.json"
+        status_file.write_text(json.dumps({"session_id": session_id, "status": "failed", "error": str(e)}), encoding="utf-8")
+        return
+
+    inbox_dir = INBOX_DIR / str(session_id)
+    status_file = STATUS_DIR / f"session_{session_id}.json"
+    alerts_out = ALERTS_DIR / f"session_{session_id}_alerts.jsonl"
+
+    # start status
+    status = {"session_id": session_id, "status": "running", "started": time()}
+    status_file.write_text(json.dumps(status), encoding="utf-8")
+
+    try:
+        if not inbox_dir.exists():
+            status.update({"status": "done", "batch_count": 0, "flow_count": 0, "alerts_count": 0, "finished": time()})
+            status_file.write_text(json.dumps(status), encoding="utf-8")
+            return
+
+        batch_files = sorted(inbox_dir.glob("batch_*.jsonl"))
+        batch_count = len(batch_files)
+        total_flows = 0
+        total_alerts = 0
+
+        # open alerts_out for writing (overwrite if existing)
+        with alerts_out.open("w", encoding="utf-8") as out_fh:
+            for bf in batch_files:
+                rows = []
+                try:
+                    with bf.open("r", encoding="utf-8") as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                obj = json.loads(line)
+                                if isinstance(obj, dict) and "_meta" in obj:
+                                    continue
+                                rows.append(obj)
+                            except Exception:
+                                # skip bad lines but continue processing
+                                continue
+                except Exception as e:
+                    log.exception("failed to read batch file %s: %s", bf, e)
+                    # continue to next batch (don't abort session on one file)
+                    continue
+
+                total_flows += len(rows)
+                try:
+                    alerts = _score_batch(det, rows)
+                except Exception as e:
+                    log.exception("scoring failure for session %s batch %s: %s", session_id, bf, e)
+                    alerts = []
+
+                for a in alerts:
+                    out_fh.write(json.dumps(a) + "\n")
+                total_alerts += len(alerts)
+
+                # optionally update intermediate status so client can poll progress
+                status.update({"status": "running", "processed_batches": None, "batch_count": batch_count, "flow_count": total_flows, "alerts_so_far": total_alerts})
+                try:
+                    status_file.write_text(json.dumps(status), encoding="utf-8")
+                except Exception:
+                    pass
+
+        # final status
+        status.update({
+            "status": "done",
+            "batch_count": batch_count,
+            "flow_count": total_flows,
+            "alerts_count": total_alerts,
+            "alerts_path": str(alerts_out) if alerts_out.exists() else None,
+            "finished": time(),
+        })
+        status_file.write_text(json.dumps(status), encoding="utf-8")
+
+        # archive processed inbox to keep inbox tidy
+        try:
+            archive_dest = ARCHIVE_DIR / str(session_id)
+            archive_dest.parent.mkdir(parents=True, exist_ok=True)
+            if inbox_dir.exists():
+                shutil.move(str(inbox_dir), str(archive_dest))
+        except Exception:
+            log.debug("session archive failed for %s", session_id)
+
+        log.info("processed session %s: batches=%d flows=%d alerts=%d -> %s", session_id, batch_count, total_flows, total_alerts, alerts_out)
+    except Exception as e:
+        log.exception("session processing failed for %s: %s", session_id, e)
+        status.update({"status": "failed", "error": str(e), "finished": time()})
+        status_file.write_text(json.dumps(status), encoding="utf-8")
+
+
+def _session_worker_loop(model_path: str, poll_interval: float = 1.0):
+    log.info("session worker starting (polling jobs dir=%s)", JOBS_DIR)
+    while True:
+        try:
+            job_files = sorted(JOBS_DIR.glob("session_*.job"))
+            for jf in job_files:
+                try:
+                    job = json.loads(jf.read_text(encoding="utf-8"))
+                    sid = job.get("session_id")
+                    if not sid:
+                        jf.unlink(missing_ok=True)
+                        continue
+                    # process session (safe; idempotent once job removed below)
+                    _process_session(sid, model_path)
+                finally:
+                    try:
+                        jf.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+            sleep(poll_interval)
+        except Exception as e:
+            log.exception("session worker loop error: %s", e)
+            sleep(1.0)
+
+
+def start_session_worker(model_path: str):
+    t = Thread(target=_session_worker_loop, args=(model_path,), daemon=True)
     t.start()
     return t

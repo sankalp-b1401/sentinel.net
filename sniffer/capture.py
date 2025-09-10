@@ -10,9 +10,27 @@ from typing import Optional
 from config import CAPTURE_DIR, BPF_FILTER
 
 class PacketCapture:
+    """
+    Helpers for capturing packets with scapy.
+
+    Explanation of technologies:
+    - scapy.sniff: low-level packet capture and callback invocation for each packet.
+    - PcapWriter: write packets to a pcap file incrementally (useful for large captures).
+    - threading.Event / Thread: used for background capture and stopping.
+    - Queue: used when streaming packets into a producer/consumer workflow.
+
+    This class provides two modes:
+    - capture_to_file: synchronous capture to a PCAP file with a progress indicator.
+    - start_stream: background capture that pushes Packet objects into a Queue.
+    """
+
     @staticmethod
     def _render_progress(current: int, total: int, width: int = 40) -> None:
-        """Draw a simple in-terminal progress bar."""
+        """Draw a simple in-terminal progress bar.
+
+        - If total <= 0 (unbounded capture), print a simple counter.
+        - If total > 0, show a filled bar with percentage.
+        """
         if total <= 0:
             # for unbounded capture we show just a counter
             print(f"\rCaptured: {current} packets", end="", flush=True)
@@ -23,13 +41,19 @@ class PacketCapture:
         print(f"\r[{bar}] {int(ratio * 100):3d}% ({current}/{total})", end="", flush=True)
 
     def __init__(self, iface_name: str, bpf: str = BPF_FILTER) -> None:
+        # interface name to capture on and an optional BPF filter string
         self.iface = iface_name
         self.bpf = bpf
 
     def capture_to_file(self, count: int = 100000, prefix: str = "capture") -> Path:
         """
         Capture up to `count` packets to a PCAP while showing a CLI progress status.
-        If count == 0 then capture until Ctrl+C.
+        If count == 0 then capture until Ctrl+C (unbounded).
+        Returns the Path to the saved pcap (may delete empty file if nothing captured).
+
+        Notes:
+        - CAPTURE_DIR is created if missing.
+        - PcapWriter is opened with sync=True for safer writes on interrupts.
         """
         CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         fname = CAPTURE_DIR / f"{prefix}_{strftime('%Y%m%d_%H%M%S')}.pcap"
@@ -39,18 +63,19 @@ class PacketCapture:
         stop_event = Event()
 
         def _on_pkt(pkt: Packet):
+            # Called by scapy for each captured packet.
+            # We write to disk and update the counter. Any single-packet errors are ignored.
             nonlocal captured
             try:
                 writer.write(pkt)
                 captured += 1
-                # render differently for unbounded vs bounded captures
                 PacketCapture._render_progress(captured, count)
             except Exception:
                 # don't stop capture on individual packet write errors
                 pass
 
         try:
-            # For unbounded (count == 0) show simple counter, else show progress bar
+            # Informative CLI line: bounded captures print target count, unbounded instructs user to use Ctrl+C
             print(f"[info] starting capture on '{self.iface}' (filter='{self.bpf}') - press Ctrl+C to stop" if count == 0 else f"[info] capturing up to {count} packets on '{self.iface}'")
             sniff(
                 iface=self.iface,
@@ -81,9 +106,9 @@ class PacketCapture:
         if captured:
             print(f"\n[ok] saved {captured} packets -> {fname}")
         else:
-            # if user aborted very quickly we may have an empty file; delete it
+            # if user aborted very quickly we may have an empty file; attempt to clean it up
             try:
-                if fname.exists() and fname.stat().st_size == 24:  # minimal pcap header size sometimes small
+                if fname.exists() and fname.stat().st_size == 24:  # minimal pcap header length
                     fname.unlink(missing_ok=True)
                     print("[warn] no packets captured; removed empty file")
                 else:
@@ -97,15 +122,22 @@ class PacketCapture:
         """
         Background thread capture that pushes packets into packet_queue.
         Use stop_event.set() to request stop.
+
+        Parameters:
+        - packet_queue: a queue.Queue instance where Packet objects will be put.
+        - stop_event: threading.Event that signals termination.
+        - store: if True, scapy will store packets in memory (not recommended for long runs).
         """
         def _prn(pkt: Packet) -> None:
+            # Best-effort: try to put into queue without blocking to avoid blocking sniff thread.
             try:
                 packet_queue.put(pkt, block=False)
             except Exception:
-                # queue full -> drop to avoid blocking sniff thread
+                # queue full or other error -> drop silently
                 pass
 
         def _worker():
+            # Worker function run inside the daemon thread.
             try:
                 sniff(
                     iface=self.iface,
@@ -123,6 +155,7 @@ class PacketCapture:
 
 
 if __name__ == "__main__":
+    # CLI helper: choose interface and capture; uses InterfaceManager.select() when iface omitted.
     import argparse
     from .if_manager import InterfaceManager
     from config import BPF_FILTER
@@ -136,6 +169,7 @@ if __name__ == "__main__":
 
     iface_name = args.iface
     if not iface_name:
+        # If no interface provided, prompt user to select one using interface helper.
         iface = InterfaceManager().select()
         iface_name = iface["name"]
 
