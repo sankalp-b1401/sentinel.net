@@ -22,6 +22,13 @@ Descope provides OAuth-based scoped access tokens, ensuring:
 
 ---
 
+## Video Link
+
+[YT Video Submission](https://youtu.be/Yuc-SfHj9xo)
+[Link to Project Workflow Files](https://www.figma.com/board/JC2bMV2rLtlpGrGQ4EODCQ/sentinel.net?node-id=0-1&p=f&t=wSfVi4u6ByJdJdMx-0)
+
+---
+
 ## Key Components
 
 - **Sniffer Agent (Agent A):** Captures network packets, converts to flows, and either stores locally or securely streams batches to Detector.
@@ -152,12 +159,6 @@ python main.py
 3. Detector scoring:
    - Alerts saved in `detector/alerts/` as JSON.
    - Each batch/session creates a **new alert file**.
-
----
-
-## Video Link
-
-[Link to demo video will be added here]
 
 ---
 
