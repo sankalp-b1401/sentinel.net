@@ -6,7 +6,7 @@ A multi-agent AI system for **network monitoring and anomaly detection**, built 
 
 ## Team Details
 
-**Team Name:** Skibidi  
+**Team Name:** RedFlag
 **Member:** Sankalp Bansal
 
 ---
