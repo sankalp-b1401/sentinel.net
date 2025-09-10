@@ -51,40 +51,41 @@ Dependencies are listed in `requirements.txt`.
 ```plaintext
 sentinel.net/
 │
-├── auth/                     # Authentication (Descope & JWKS verification)
-│   ├── descope_client.py
-│   ├── jwk_verify.py
+├── auth/ # Authentication (Descope & JWKS verification)
+│ ├── descope_client.py
+│ └── jwk_verify.py
 │
-├── detector/                 # Detector Agent
-│   ├── alerts/
-│   ├── features/
-│   ├── inbox/
-│   ├── models/
-│   ├── status/
-│   ├── detector.py
-│   ├── feature_builder.py
-│   ├── metrics.py
-│   ├── queue_worker.py
-│   ├── real_time.py
-│   ├── server_http.py
+├── detector/ # Detector Agent
+│ ├── alerts/ # generated alerts (JSON files)
+│ ├── features/ # feature extraction helpers
+│ ├── inbox/ # inbound batches saved by HTTP API
+│ ├── models/ # trained model files (joblib / pkl)
+│ ├── status/ # runtime / status files
+│ ├── detector.py
+│ ├── feature_builder.py
+│ ├── metrics.py
+│ ├── queue_worker.py
+│ ├── real_time.py
+│ └── server_http.py # HTTP API + model selection + graceful shutdown
 │
-├── sniffer/                  # Sniffer Agent
-│   ├── capture_logs/
-│   ├── batch_sender.py
-│   ├── capture.py
-│   ├── if_manager.py
-│   ├── parser.py
-│   ├── sender_worker.py
-│   ├── transport_http.py
+├── sniffer/ # Sniffer Agent
+│ ├── capture_logs/ # pcap files
+│ ├── batch_sender.py
+│ ├── capture.py
+│ ├── if_manager.py
+│ ├── parser.py
+│ ├── sender_worker.py
+│ └── transport_http.py
 │
-├── utils/                    # Utility functions
-│   ├── alert_accuracy_check.py
-│   ├── chooser.py
-│   ├── progress.py
+├── utils/ # Utility functions
+│ ├── alert_accuracy_check.py
+│ ├── chooser.py
+│ └── progress.py
 │
-├── flow_records/             # Stored parsed flow files
-├── main.py                   # CLI Orchestrator
-├── config.py                 # Config loader for .env variables
+├── flow_records/ # Stored parsed flow files (flow JSONL)
+├── ui.py # centralized CLI UI helpers (colors, prompts, ls-style)
+├── main.py # CLI Orchestrator (capture -> parse -> save/send)
+├── config.py # Config loader for .env variables
 ├── requirements.txt
 └── README.md
 
