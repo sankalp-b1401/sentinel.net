@@ -16,6 +16,8 @@ detector/alerts/
 detector/models/
 detector/status/
 detector/inbox/
+detector/jobs/
+detector/archives/
 detector/__pycache__/
 
 utils/__pycache__/
